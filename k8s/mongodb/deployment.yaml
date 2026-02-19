@@ -57,21 +57,17 @@ spec:
                 - "--eval"
                 - "db.adminCommand('ping').ok"
                 - "--quiet"
-            initialDelaySeconds: 20
-            periodSeconds: 10
+            initialDelaySeconds: 40
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 8
+          livenessProbe:
+            tcpSocket:
+              port: 27017
+            initialDelaySeconds: 60
+            periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 6
-          livenessProbe:
-            exec:
-              command:
-                - mongosh
-                - "--eval"
-                - "db.adminCommand('ping').ok"
-                - "--quiet"
-            initialDelaySeconds: 60
-            periodSeconds: 20
-            timeoutSeconds: 5
-            failureThreshold: 5
       volumes:
         - name: mongo-storage
           persistentVolumeClaim:
