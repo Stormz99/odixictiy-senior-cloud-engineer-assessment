@@ -3,6 +3,7 @@
 const express = require("express");
 const { MongoClient } = require("mongodb");
 const crypto = require("crypto");
+const { PubSub } = require("@google-cloud/pubsub");
 
 const MONGO_URI = process.env.MONGO_URI || "mongodb://mongo:27017/assessmentdb";
 const APP_PORT = parseInt(process.env.APP_PORT || "3000", 10);
@@ -12,6 +13,12 @@ const mongoClient = new MongoClient(MONGO_URI, {
   serverSelectionTimeoutMS: 5000,
   connectTimeoutMS: 10000,
 });
+const pubsub = new PubSub({
+  apiEndpoint: process.env.PUBSUB_EMULATOR_HOST,
+  projectId: "assessment-project",
+});
+
+const topic = pubsub.topic("mongo-writes");
 
 async function connectMongo(retries = 10, delayMs = 5000) {
   for (let attempt = 1; attempt <= retries; attempt++) {
@@ -70,17 +77,23 @@ app.get("/api/data", async (_req, res) => {
   const col = db.collection("records");
 
   try {
-    // 5 writes
-    const writes = [];
-    for (let i = 0; i < 5; i++) {
-      const result = await col.insertOne({
-        type: "write",
-        index: i,
-        payload: randomPayload(),
-        timestamp: new Date(),
-      });
-      writes.push(result.insertedId.toString());
-    }
+    // 5 writes (publish to queue instead of direct Mongo writes)
+const now = new Date();
+
+const writes = await Promise.all(
+  Array.from({ length: 5 }, (_, i) => {
+    const payload = {
+      type: "write",
+      index: i,
+      payload: randomPayload(),
+      timestamp: now,
+    };
+
+    return topic.publishMessage({
+      data: Buffer.from(JSON.stringify(payload)),
+    });
+  })
+);
 
     // 5 reads
     const reads = [];

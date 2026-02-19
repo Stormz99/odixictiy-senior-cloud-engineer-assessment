@@ -8,6 +8,7 @@
     "dev": "node --watch index.js"
   },
   "dependencies": {
+    "@google-cloud/pubsub": "^5.2.4",
     "express": "^4.19.2",
     "mongodb": "^6.8.0"
   },
