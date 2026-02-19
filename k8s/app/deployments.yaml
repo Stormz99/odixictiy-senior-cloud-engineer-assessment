@@ -1,74 +1,3 @@
----
-# ──────────────────────────────────────────────────────────────────────────────
-# Python Application Deployment (FastAPI + Uvicorn)
-#
-# Candidates: This is where you can scale horizontally (replicas, HPA),
-# tune resource requests, add liveness/readiness probes, etc.
-# The MongoDB deployment cannot be scaled — only this tier can be expanded.
-# ──────────────────────────────────────────────────────────────────────────────
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: app-python
-  namespace: assessment
-  labels:
-    app: app-python
-    language: python
-    assessment: "true"
-spec:
-  replicas: 1   # ← candidates may tune this
-  selector:
-    matchLabels:
-      app: app-python
-  template:
-    metadata:
-      labels:
-        app: app-python
-        language: python
-    spec:
-      containers:
-        - name: app-python
-          image: assessment/app-python:latest
-          imagePullPolicy: Never          # uses k3d local registry image
-          ports:
-            - containerPort: 8000
-          env:
-            - name: MONGO_URI
-              value: "mongodb://mongo:27017/assessmentdb"
-            - name: APP_PORT
-              value: "3000"
-            - name: PUBSUB_EMULATOR_HOST
-              value: "pubsub-emulator:8085"
-          resources:
-            requests:
-              memory: "128Mi"
-              cpu: "250m"
-            limits:
-              memory: "512Mi"
-              cpu: "1000m"
-          readinessProbe:
-            httpGet:
-              path: /readyz
-              port: 8000
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            failureThreshold: 3
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 8000
-            initialDelaySeconds: 10
-            periodSeconds: 20
-            failureThreshold: 5
----
-# ──────────────────────────────────────────────────────────────────────────────
-# Node.js Application Deployment (Express)
-#
-# Same constraints and opportunities as the Python deployment above.
-# Candidates pick ONE app to optimise — both are provisioned by default
-# but the Ingress below routes all traffic to app-python. Candidates who
-# choose Node.js should update the Ingress backend accordingly.
-# ──────────────────────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -79,7 +8,7 @@ metadata:
     language: nodejs
     assessment: "true"
 spec:
-  replicas: 1   # ← candidates may tune this
+  replicas: 1
   selector:
     matchLabels:
       app: app-nodejs
@@ -100,6 +29,8 @@ spec:
               value: "mongodb://mongo:27017/assessmentdb"
             - name: APP_PORT
               value: "3000"
+            - name: PUBSUB_EMULATOR_HOST
+              value: "pubsub-emulator:8085"
           resources:
             requests:
               memory: "128Mi"
