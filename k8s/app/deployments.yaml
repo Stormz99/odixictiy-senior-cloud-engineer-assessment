@@ -42,13 +42,15 @@ spec:
             httpGet:
               path: /readyz
               port: 3000
-            initialDelaySeconds: 5
+            initialDelaySeconds: 15
             periodSeconds: 10
-            failureThreshold: 3
+            timeoutSeconds: 3
+            failureThreshold: 5
           livenessProbe:
             httpGet:
               path: /healthz
               port: 3000
-            initialDelaySeconds: 10
+            initialDelaySeconds: 20
             periodSeconds: 20
+            timeoutSeconds: 3
             failureThreshold: 5
