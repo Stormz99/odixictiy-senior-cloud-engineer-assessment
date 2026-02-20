@@ -25,6 +25,9 @@ async function connectMongo(retries = 10, delayMs = 5000) {
     try {
       await mongoClient.connect();
       db = mongoClient.db("assessmentdb");
+
+      await db.collection("records").createIndex({ type: 1 });
+
       console.log(`[mongo] connected on attempt ${attempt}`);
       return;
     } catch (err) {
@@ -95,12 +98,16 @@ const writes = await Promise.all(
   })
 );
 
-    // 5 reads
-    const reads = [];
-    for (let i = 0; i < 5; i++) {
-      const doc = await col.findOne({ type: "write" });
-      reads.push(doc ? doc._id.toString() : null);
-    }
+    // 5 reads using single indexed query
+const readDocs = await col
+  .find({ type: "write" })
+  .limit(5)
+  .toArray();
+  
+  const reads = readDocs.map((doc) =>
+  doc ? doc._id.toString() : null
+);
+
 
     res.json({
       status: "success",
