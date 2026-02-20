@@ -56,21 +56,24 @@ patterns used in modern distributed systems.
 
 ### Core Components
 
-**Node.js API Service** - Handles HTTP requests - Publishes 5 write
-events asynchronously - Performs 5 indexed read operations - Exposes
-`/healthz` and `/readyz` endpoints
+**Node.js API Service**
+- Handles HTTP requests
+- Publishes 5 write events asynchronously
+- Performs 5 indexed read operations
+- Exposes `/healthz` and `/readyz` endpoints
 
-**MongoDB** - Stores processed records - Indexed on `{ type: 1 }` for
-optimized read performance
+**MongoDB**
+- Stores processed records 
+- Indexed on `{ type: 1 }` for optimized read performance
 
-**Pub/Sub Emulator** - Provides event-driven decoupling - Enables
-asynchronous write processing
+**Pub/Sub Emulator** - Provides event-driven decoupling 
+- Enables asynchronous write processing
 
-**Worker Service** - Subscribes to Pub/Sub - Inserts records into
-MongoDB
+**Worker Service** - Subscribes to Pub/Sub 
+- Inserts records into MongoDB
 
-**Kubernetes (k3d)** - Orchestrates workloads - Provides horizontal
-scaling via HPA
+**Kubernetes (k3d)** - Orchestrates workloads 
+- Provides horizontal scaling via HPA
 
 ------------------------------------------------------------------------
 
@@ -114,7 +117,7 @@ The API does not persist state locally. This allows:
 -   Rescheduling across nodes
 -   Zero-downtime rolling updates
 
-Tradeoff: - Requires external persistence and queue systems.
+Tradeoff: Requires external persistence and queue systems.
 
 ------------------------------------------------------------------------
 
@@ -123,11 +126,13 @@ Tradeoff: - Requires external persistence and queue systems.
 Write operations are published to Pub/Sub rather than written directly
 to MongoDB.
 
-Benefits: - Reduces request latency - Prevents DB write bottlenecks -
-Improves resilience under load
+Benefits: 
+- Reduces request latency 
+- Prevents DB write bottlenecks
+- Improves resilience under load
 
-Tradeoff: - Eventual consistency (reads may not reflect writes
-immediately)
+Tradeoff: 
+- Eventual consistency (reads may not reflect writes immediately)
 
 ------------------------------------------------------------------------
 
@@ -176,38 +181,51 @@ System remained available and responsive under load.
 
 ## 1. MongoDB Failure
 
-Impact: - Readiness probe fails - API returns 503 - Pods remain alive
-but marked Not Ready
+Impact: 
+- Readiness probe fails
+ - API returns 503 - Pods remain alive but marked Not Ready
 
-Mitigation: - Readiness probe prevents traffic routing - ReplicaSet
-ensures restart capability - Production: use Mongo replica set or
-managed service
+Mitigation:
+- Readiness probe prevents traffic routing
+ - ReplicaSet ensures restart capability
+- Production: use Mongo replica set or managed service
 
 ------------------------------------------------------------------------
 
 ## 2. Pub/Sub Failure
 
-Impact: - Publish attempts fail - Writes dropped or retried
+Impact: 
+- Publish attempts fail
+- Writes dropped or retried
 
-Mitigation: - Retry logic - Dead-letter queues (production design) -
-Managed Pub/Sub or Kafka for durability
+Mitigation: 
+- Retry logic
+ - Dead-letter queues (production design)
+- Managed Pub/Sub or Kafka for durability
 
 ------------------------------------------------------------------------
 
 ## 3. Pod CPU Saturation
 
-Impact: - Increased latency - HPA triggers scale-up
+Impact: 
+- Increased latency
+- HPA triggers scale-up
 
-Mitigation: - Lower CPU thresholds - Increase resource limits - Node
-autoscaling (production)
+Mitigation: 
+- Lower CPU thresholds
+- Increase resource limits
+- Node autoscaling (production)
 
 ------------------------------------------------------------------------
 
 ## 4. Node Failure
 
-Impact: - Pods rescheduled on healthy nodes
+Impact: 
+- Pods rescheduled on healthy nodes
 
-Mitigation: - Stateless API design - Kubernetes self-healing behavior
+Mitigation: 
+- Stateless API design
+ - Kubernetes self-healing behavior
 
 ------------------------------------------------------------------------
 
