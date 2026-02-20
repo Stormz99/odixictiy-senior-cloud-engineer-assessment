@@ -1,4 +1,4 @@
-# DevOps Assessment -- Scalable Microservices Architecture
+# DevOps Assessment: Scalable Microservices Architecture
 
 ## Executive Summary
 
