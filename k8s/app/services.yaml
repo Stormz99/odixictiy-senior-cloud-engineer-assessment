@@ -3,14 +3,14 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: app-python
+  name: app-nodejs
   namespace: assessment
   labels:
-    app: app-python
+    app: app-nodejs
     assessment: "true"
 spec:
   selector:
-    app: app-python
+    app: app-nodejs
   ports:
     - name: http
       protocol: TCP
@@ -63,6 +63,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: app-python      # ← change to app-nodejs to switch
+                name: app-nodejs     # ← change to app-nodejs to switch
                 port:
                   number: 80
