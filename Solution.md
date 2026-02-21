@@ -271,6 +271,8 @@ Create cluster:
 
     ./setup.sh
 <img width="499" height="350" alt="image" src="https://github.com/user-attachments/assets/c9d61e7d-fe63-45f1-9eba-325c6fe678cb" />
+<img width="465" height="276" alt="image" src="https://github.com/user-attachments/assets/8cf2a5c8-5570-426b-b147-b68fc0d67217" />
+
 
 Run stress test:
     k6 run --vus 300 --duration 30s stress-test/stress-test.js
