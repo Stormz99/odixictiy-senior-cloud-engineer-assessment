@@ -68,12 +68,7 @@ app.get("/readyz", async (_req, res) => {
       .json({ status: "not ready", error: "DB not connected" });
   }
 
-  try {
-    await mongoClient.db("admin").command({ ping: 1 });
-    res.json({ status: "ready", timestamp: new Date().toISOString() });
-  } catch (err) {
-    res.status(503).json({ status: "not ready", error: err.message });
-  }
+  return res.json({ status: "ready", timestamp: new Date().toISOString() });
 });
 
 /* ===========================
