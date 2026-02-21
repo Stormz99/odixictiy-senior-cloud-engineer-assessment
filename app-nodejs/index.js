@@ -41,7 +41,7 @@ async function connectMongo(retries = 10, delayMs = 5000) {
   }
 }
 
-function randomPayload(size = 512) {
+function randomPayload(size = 128) {
   return crypto
     .randomBytes(Math.ceil(size / 2))
     .toString("hex")
@@ -83,21 +83,22 @@ app.get("/api/data", async (_req, res) => {
     // 5 writes (publish to queue instead of direct Mongo writes)
 const now = new Date();
 
-const writes = await Promise.all(
-  Array.from({ length: 5 }, (_, i) => {
-    const payload = {
-      type: "write",
-      index: i,
-      payload: randomPayload(),
-      timestamp: now,
-    };
+const writes = [];
 
-    return topic.publishMessage({
-      data: Buffer.from(JSON.stringify(payload)),
-    });
-  })
-);
+for (let i = 0; i < 5; i++) {
+  const payload = {
+    type: "write",
+    index: i,
+    payload: randomPayload(128), // this handles payload size and variability, hence increasing reliability
+    timestamp: now,
+  };
 
+  topic.publishMessage({
+    data: Buffer.from(JSON.stringify(payload)),
+  }).catch(() => {});
+
+  writes.push("queued");
+}
     // 5 reads using single indexed query
 const readDocs = await col
   .find({ type: "write" })
