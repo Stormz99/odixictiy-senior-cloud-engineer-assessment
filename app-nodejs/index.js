@@ -3,22 +3,19 @@
 const express = require("express");
 const { MongoClient } = require("mongodb");
 const crypto = require("crypto");
-const { PubSub } = require("@google-cloud/pubsub");
 
-const MONGO_URI = process.env.MONGO_URI || "mongodb://mongo:27017/assessmentdb";
+const MONGO_URI =
+  process.env.MONGO_URI || "mongodb://mongo:27017/assessmentdb";
 const APP_PORT = parseInt(process.env.APP_PORT || "3000", 10);
 
 let db;
+
 const mongoClient = new MongoClient(MONGO_URI, {
+  maxPoolSize: 200,
+  minPoolSize: 20,
   serverSelectionTimeoutMS: 5000,
   connectTimeoutMS: 10000,
 });
-const pubsub = new PubSub({
-  apiEndpoint: process.env.PUBSUB_EMULATOR_HOST,
-  projectId: "assessment-project",
-});
-
-const topic = pubsub.topic("mongo-writes");
 
 async function connectMongo(retries = 10, delayMs = 5000) {
   for (let attempt = 1; attempt <= retries; attempt++) {
@@ -32,10 +29,13 @@ async function connectMongo(retries = 10, delayMs = 5000) {
       return;
     } catch (err) {
       console.error(
-        `[mongo] attempt ${attempt}/${retries} failed: ${err.message}`,
+        `[mongo] attempt ${attempt}/${retries} failed: ${err.message}`
       );
-      if (attempt === retries)
+
+      if (attempt === retries) {
         throw new Error(`MongoDB unreachable after ${retries} attempts`);
+      }
+
       await new Promise((r) => setTimeout(r, delayMs));
     }
   }
@@ -51,17 +51,23 @@ function randomPayload(size = 128) {
 const app = express();
 app.use(express.json());
 
-// Liveness probe
+/* ===========================
+   Liveness Probe
+=========================== */
 app.get("/healthz", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// Readiness probe
+/* ===========================
+   Readiness Probe
+=========================== */
 app.get("/readyz", async (_req, res) => {
-  if (!db)
+  if (!db) {
     return res
       .status(503)
       .json({ status: "not ready", error: "DB not connected" });
+  }
+
   try {
     await mongoClient.db("admin").command({ ping: 1 });
     res.json({ status: "ready", timestamp: new Date().toISOString() });
@@ -70,49 +76,44 @@ app.get("/readyz", async (_req, res) => {
   }
 });
 
-// Core endpoint — must perform exactly 5 reads and 5 writes per request
+/* ===========================
+   Core Endpoint
+   MUST perform 5 reads + 5 writes
+=========================== */
 app.get("/api/data", async (_req, res) => {
-  if (!db)
+  if (!db) {
     return res
       .status(503)
       .json({ status: "error", message: "DB not connected" });
+  }
 
   const col = db.collection("records");
 
   try {
-    // 5 writes (publish to queue instead of direct Mongo writes)
-const now = new Date();
+    const now = new Date();
 
-const writes = [];
+    // 5 NON-BLOCKING writes
+    for (let i = 0; i < 5; i++) {
+      col.insertOne({
+        type: "write",
+        index: i,
+        payload: randomPayload(128),
+        timestamp: now,
+      }).catch(() => {});
+    }
 
-for (let i = 0; i < 5; i++) {
-  const payload = {
-    type: "write",
-    index: i,
-    payload: randomPayload(128), // this handles payload size and variability, hence increasing reliability
-    timestamp: now,
-  };
+    // 5 reads (projection reduces document size)
+    const readDocs = await col
+      .find({ type: "write" }, { projection: { _id: 1 } })
+      .limit(5)
+      .toArray();
 
-  topic.publishMessage({
-    data: Buffer.from(JSON.stringify(payload)),
-  }).catch(() => {});
-
-  writes.push("queued");
-}
-    // 5 reads using single indexed query
-const readDocs = await col
-  .find({ type: "write" })
-  .limit(5)
-  .toArray();
-  
-  const reads = readDocs.map((doc) =>
-  doc ? doc._id.toString() : null
-);
-
+    const reads = readDocs.map((doc) =>
+      doc ? doc._id.toString() : null
+    );
 
     res.json({
       status: "success",
-      writes,
       reads,
       timestamp: new Date().toISOString(),
     });
@@ -121,21 +122,30 @@ const readDocs = await col
   }
 });
 
-// Collection stats
+/* ===========================
+   Stats Endpoint
+=========================== */
 app.get("/api/stats", async (_req, res) => {
-  if (!db)
+  if (!db) {
     return res
       .status(503)
       .json({ status: "error", message: "DB not connected" });
+  }
+
   try {
     const count = await db.collection("records").countDocuments({});
-    res.json({ total_documents: count, timestamp: new Date().toISOString() });
+    res.json({
+      total_documents: count,
+      timestamp: new Date().toISOString(),
+    });
   } catch (err) {
     res.status(500).json({ status: "error", message: err.message });
   }
 });
 
-// Start server immediately, connect to mongo in background
+/* ===========================
+   Start Server
+=========================== */
 app.listen(APP_PORT, "0.0.0.0", () => {
   console.log(`[app] listening on port ${APP_PORT}`);
 });

@@ -1,22 +1,4 @@
----
-# Python App Service
-apiVersion: v1
-kind: Service
-metadata:
-  name: app-nodejs
-  namespace: assessment
-  labels:
-    app: app-nodejs
-    assessment: "true"
-spec:
-  selector:
-    app: app-nodejs
-  ports:
-    - name: http
-      protocol: TCP
-      port: 80
-      targetPort: 8000
-  type: ClusterIP
+
 ---
 # Node.js App Service
 apiVersion: v1

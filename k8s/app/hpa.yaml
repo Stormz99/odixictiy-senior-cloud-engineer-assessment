@@ -10,31 +10,7 @@
 # Prerequisites:
 #   kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
 # ──────────────────────────────────────────────────────────────────────────────
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: app-python-hpa
-  namespace: assessment
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: app-python
-  minReplicas: 2
-  maxReplicas: 20
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 60
-    - type: Resource
-      resource:
-        name: memory
-        target:
-          type: Utilization
-          averageUtilization: 70
+
 ---
 # HorizontalPodAutoscaler — Node.js App
 apiVersion: autoscaling/v2
@@ -47,7 +23,7 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: app-nodejs
-  minReplicas: 2
+  minReplicas: 5
   maxReplicas: 20
   metrics:
     - type: Resource

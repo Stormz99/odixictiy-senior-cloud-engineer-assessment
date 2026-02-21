@@ -8,7 +8,7 @@ metadata:
     language: nodejs
     assessment: "true"
 spec:
-  replicas: 1
+  replicas: 10
   selector:
     matchLabels:
       app: app-nodejs
@@ -33,11 +33,11 @@ spec:
               value: "pubsub-emulator:8085"
           resources:
             requests:
-              memory: "128Mi"
-              cpu: "250m"
+              memory: "256Mi"
+              cpu: "500m"
             limits:
               memory: "512Mi"
-              cpu: "1000m"
+              cpu: "2000m"
           readinessProbe:
             httpGet:
               path: /readyz
