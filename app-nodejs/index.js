@@ -4,6 +4,16 @@ const express = require("express");
 const { MongoClient } = require("mongodb");
 const crypto = require("crypto");
 
+const { PubSub } = require("@google-cloud/pubsub");
+
+const pubsub = new PubSub({
+  apiEndpoint: process.env.PUBSUB_EMULATOR_HOST,
+  projectId: "assessment-project",
+});
+
+const topicName = "mongo-writes";
+const topic = pubsub.topic(topicName);
+
 const MONGO_URI =
   process.env.MONGO_URI || "mongodb://mongo:27017/assessmentdb";
 const APP_PORT = parseInt(process.env.APP_PORT || "3000", 10);
@@ -87,17 +97,21 @@ app.get("/api/data", async (_req, res) => {
   try {
     const now = new Date();
 
-    // 5 NON-BLOCKING writes
+    // 5 WRITES → publish to PubSub (NON-BLOCKING)
     for (let i = 0; i < 5; i++) {
-      col.insertOne({
+      const payload = {
         type: "write",
         index: i,
         payload: randomPayload(128),
         timestamp: now,
+      };
+
+      topic.publishMessage({
+        data: Buffer.from(JSON.stringify(payload)),
       }).catch(() => {});
     }
 
-    // 5 reads (projection reduces document size)
+    // 5 READS (indexed + projection)
     const readDocs = await col
       .find({ type: "write" }, { projection: { _id: 1 } })
       .limit(5)
@@ -112,11 +126,11 @@ app.get("/api/data", async (_req, res) => {
       reads,
       timestamp: new Date().toISOString(),
     });
+
   } catch (err) {
     res.status(500).json({ status: "error", message: err.message });
   }
 });
-
 /* ===========================
    Stats Endpoint
 =========================== */

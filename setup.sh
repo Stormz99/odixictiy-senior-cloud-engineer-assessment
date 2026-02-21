@@ -50,20 +50,22 @@ kubectl config use-context "k3d-${CLUSTER_NAME}"
 # ── Build & push Docker images ────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-info "Building Python app image..."
-docker build -t "assessment/app-python:latest" "${SCRIPT_DIR}/app-python/"
-k3d image import "assessment/app-python:latest" --cluster "${CLUSTER_NAME}"
-success "Python image imported."
-
 info "Building Node.js app image..."
 docker build -t "assessment/app-nodejs:latest" "${SCRIPT_DIR}/app-nodejs/"
 k3d image import "assessment/app-nodejs:latest" --cluster "${CLUSTER_NAME}"
 success "Node.js image imported."
 
+info "Building Worker image..."
+docker build -t "assessment/worker:latest" "${SCRIPT_DIR}/worker/"
+k3d image import "assessment/worker:latest" --cluster "${CLUSTER_NAME}"
+success "Worker image imported."
+
 # ── Apply manifests ───────────────────────────────────────────────────────────
 info "Applying Kubernetes manifests..."
 
 kubectl apply -f "${SCRIPT_DIR}/k8s/base/namespace.yaml"
+kubectl apply -f "${SCRIPT_DIR}/k8s/pubsub"
+kubectl apply -f "${SCRIPT_DIR}/k8s/worker/"
 kubectl apply -f "${SCRIPT_DIR}/k8s/mongodb/"
 kubectl apply -f "${SCRIPT_DIR}/k8s/app/"
 
