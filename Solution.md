@@ -272,9 +272,7 @@ Create cluster:
     ./setup.sh
 
 <img width="1154" height="805" alt="image" src="https://github.com/user-attachments/assets/d2487319-75c7-4584-b05b-631698b25fba" />
-<img width="499" height="350" alt="image" src="https://github.com/user-attachments/assets/c9d61e7d-fe63-45f1-9eba-325c6fe678cb" />
-<img width="465" height="276" alt="image" src="https://github.com/user-attachments/assets/8cf2a5c8-5570-426b-b147-b68fc0d67217" />
-<img width="747" height="313" alt="image" src="https://github.com/user-attachments/assets/1feb4bbd-703d-4f37-a71e-29959192a646" />
+<img width="1154" height="805" alt="image" src="https://github.com/user-attachments/assets/ce54cb3a-a1ff-467a-8d98-90761e8c2587" />
 
 
 
