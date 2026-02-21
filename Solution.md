@@ -270,12 +270,9 @@ To approach extreme scale (hundreds of thousands or millions RPS):
 Create cluster:
 
     ./setup.sh
+<img width="499" height="350" alt="image" src="https://github.com/user-attachments/assets/c9d61e7d-fe63-45f1-9eba-325c6fe678cb" />
 
 Run stress test:
- <img width="958" height="802" alt="image" src="https://github.com/user-attachments/assets/e7d958cd-37f4-447d-a406-0891e4f42b2f" />
-    <img width="790" height="801" alt="image" src="https://github.com/user-attachments/assets/4cb485f1-3ab0-4e06-9945-965f6d788120" />
-    <img width="805" height="647" alt="image" src="https://github.com/user-attachments/assets/d958c8db-5649-45b3-ac20-a3a313fd2d03" />
-
     k6 run --vus 300 --duration 30s stress-test/stress-test.js
    
 
