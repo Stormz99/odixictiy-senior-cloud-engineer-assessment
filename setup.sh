@@ -75,9 +75,6 @@ success "Manifests applied."
 info "Waiting for MongoDB to be ready (this may take ~60 s)..."
 kubectl rollout status deployment/mongo -n "${NAMESPACE}" --timeout=180s
 
-info "Waiting for Python app to be ready..."
-kubectl rollout status deployment/app-python -n "${NAMESPACE}" --timeout=120s
-
 info "Waiting for Node.js app to be ready..."
 kubectl rollout status deployment/app-nodejs -n "${NAMESPACE}" --timeout=120s
 
@@ -105,7 +102,6 @@ echo ""
 echo "  Useful commands:"
 echo "    kubectl get pods -n ${NAMESPACE}"
 echo "    kubectl top pods -n ${NAMESPACE}"
-echo "    kubectl logs -n ${NAMESPACE} deploy/app-python -f"
 echo "    kubectl logs -n ${NAMESPACE} deploy/mongo -f"
 echo ""
 echo -e "${GREEN}════════════════════════════════════════════════════════${NC}"

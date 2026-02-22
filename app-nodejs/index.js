@@ -21,32 +21,27 @@ const APP_PORT = parseInt(process.env.APP_PORT || "3000", 10);
 let db;
 
 const mongoClient = new MongoClient(MONGO_URI, {
-  maxPoolSize: 200,
-  minPoolSize: 20,
+  maxPoolSize: 20,
+  minPoolSize: 5,
   serverSelectionTimeoutMS: 5000,
-  connectTimeoutMS: 10000,
+  connectTimeoutMS: 5000,
 });
 
-async function connectMongo(retries = 10, delayMs = 5000) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
+async function connectMongo() {
+  let connected = false;
+
+  while (!connected) {
     try {
       await mongoClient.connect();
       db = mongoClient.db("assessmentdb");
 
       await db.collection("records").createIndex({ type: 1 });
 
-      console.log(`[mongo] connected on attempt ${attempt}`);
-      return;
+      console.log("[mongo] connected");
+      connected = true;
     } catch (err) {
-      console.error(
-        `[mongo] attempt ${attempt}/${retries} failed: ${err.message}`
-      );
-
-      if (attempt === retries) {
-        throw new Error(`MongoDB unreachable after ${retries} attempts`);
-      }
-
-      await new Promise((r) => setTimeout(r, delayMs));
+      console.error("[mongo] not ready, retrying in 5s...");
+      await new Promise((r) => setTimeout(r, 5000));
     }
   }
 }
