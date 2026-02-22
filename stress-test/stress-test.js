@@ -40,8 +40,7 @@ const successCount  = new Counter('successful_requests');
 const failCount     = new Counter('failed_requests');
 
 // ── Configuration ─────────────────────────────────────────────────────────────
-const BASE_URL = __ENV.BASE_URL || 'http://assessment.local';
-
+const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 // ── Load Profile ──────────────────────────────────────────────────────────────
 export const options = {
   stages: [
