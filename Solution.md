@@ -288,6 +288,8 @@ Run stress test:
     k6 run --vus 300 --duration 30s stress-test/stress-test.js   
 
 <img width="947" height="802" alt="image" src="https://github.com/user-attachments/assets/dd28eaa6-195a-46b2-969f-fd9693cf9185" />
+<img width="905" height="792" alt="image" src="https://github.com/user-attachments/assets/4b9d05e2-d1aa-4125-8071-4d18ddd7f947" />
+
 
 Monitor scaling:
 
