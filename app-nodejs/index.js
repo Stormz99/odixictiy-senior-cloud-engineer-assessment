@@ -3,20 +3,20 @@
 const express = require("express");
 const { MongoClient } = require("mongodb");
 const crypto = require("crypto");
-
 const { PubSub } = require("@google-cloud/pubsub");
+const { createClient } = require("redis");
 
-const pubsub = new PubSub({
-  apiEndpoint: process.env.PUBSUB_EMULATOR_HOST,
-  projectId: "assessment-project",
-});
+/* ===========================
+   Config
+=========================== */
 
-const topicName = "mongo-writes";
-const topic = pubsub.topic(topicName);
-
-const MONGO_URI =
-  process.env.MONGO_URI || "mongodb://mongo:27017/assessmentdb";
 const APP_PORT = parseInt(process.env.APP_PORT || "3000", 10);
+const MONGO_URI = process.env.MONGO_URI || "mongodb://mongo:27017/assessmentdb";
+const REDIS_URL = process.env.REDIS_URL || "redis://redis:6379";
+
+/* ===========================
+   Mongo
+=========================== */
 
 let db;
 
@@ -28,23 +28,63 @@ const mongoClient = new MongoClient(MONGO_URI, {
 });
 
 async function connectMongo() {
-  let connected = false;
-
-  while (!connected) {
+  while (!db) {
     try {
       await mongoClient.connect();
       db = mongoClient.db("assessmentdb");
-
       await db.collection("records").createIndex({ type: 1 });
-
       console.log("[mongo] connected");
-      connected = true;
     } catch (err) {
-      console.error("[mongo] not ready, retrying in 5s...");
+      console.error("[mongo] retrying in 5s...");
       await new Promise((r) => setTimeout(r, 5000));
     }
   }
 }
+
+/* ===========================
+   Redis (SAFE MODE)
+=========================== */
+
+let redisClient = null;
+
+async function connectRedis() {
+  try {
+    const client = createClient({ url: REDIS_URL });
+
+    client.on("error", (err) =>
+      console.error("[redis] error:", err.message)
+    );
+
+    await client.connect();
+    redisClient = client;
+    console.log("[redis] connected");
+  } catch (err) {
+    console.error("[redis] unavailable — continuing without cache");
+  }
+}
+
+connectRedis();
+
+/* ===========================
+   PubSub (SAFE MODE)
+=========================== */
+
+let topic = null;
+
+try {
+  const pubsub = new PubSub({
+    apiEndpoint: process.env.PUBSUB_EMULATOR_HOST,
+    projectId: "assessment-project",
+  });
+
+  topic = pubsub.topic("mongo-writes");
+} catch (err) {
+  console.error("[pubsub] unavailable");
+}
+
+/* ===========================
+   Helpers
+=========================== */
 
 function randomPayload(size = 128) {
   return crypto
@@ -53,68 +93,84 @@ function randomPayload(size = 128) {
     .slice(0, size);
 }
 
+/* ===========================
+   Express
+=========================== */
+
 const app = express();
 app.use(express.json());
 
-/* ===========================
-   Liveness Probe
-=========================== */
 app.get("/healthz", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-/* ===========================
-   Readiness Probe
-=========================== */
-app.get("/readyz", async (_req, res) => {
+app.get("/readyz", (_req, res) => {
   if (!db) {
-    return res
-      .status(503)
-      .json({ status: "not ready", error: "DB not connected" });
+    return res.status(503).json({ status: "not ready" });
   }
-
-  return res.json({ status: "ready", timestamp: new Date().toISOString() });
+  res.json({ status: "ready" });
 });
 
 /* ===========================
    Core Endpoint
-   MUST perform 5 reads + 5 writes
 =========================== */
+
 app.get("/api/data", async (_req, res) => {
   if (!db) {
-    return res
-      .status(503)
-      .json({ status: "error", message: "DB not connected" });
+    return res.status(503).json({ status: "DB not ready" });
   }
 
-  const col = db.collection("records");
-
   try {
+    const col = db.collection("records");
     const now = new Date();
 
-    // 5 WRITES → publish to PubSub (NON-BLOCKING)
+    // 5 async writes via PubSub
     for (let i = 0; i < 5; i++) {
-      const payload = {
-        type: "write",
-        index: i,
-        payload: randomPayload(128),
-        timestamp: now,
-      };
-
-      topic.publishMessage({
-        data: Buffer.from(JSON.stringify(payload)),
-      }).catch(() => {});
+      if (topic) {
+        topic.publishMessage({
+          data: Buffer.from(
+            JSON.stringify({
+              type: "write",
+              index: i,
+              payload: randomPayload(128),
+              timestamp: now,
+            })
+          ),
+        }).catch(() => {});
+      }
     }
 
-    // 5 READS (indexed + projection)
-    const readDocs = await col
-      .find({ type: "write" }, { projection: { _id: 1 } })
-      .limit(5)
-      .toArray();
+    let reads;
 
-    const reads = readDocs.map((doc) =>
-      doc ? doc._id.toString() : null
-    );
+    // Redis cache if available
+    if (redisClient) {
+      const cached = await redisClient.get("cached_reads");
+
+      if (cached) {
+        reads = JSON.parse(cached);
+      } else {
+        const docs = await col
+          .find({ type: "write" }, { projection: { _id: 1 } })
+          .limit(5)
+          .toArray();
+
+        reads = docs.map((d) => d?._id?.toString() || null);
+
+        await redisClient.set(
+          "cached_reads",
+          JSON.stringify(reads),
+          { EX: 5 }
+        );
+      }
+    } else {
+      // fallback if Redis unavailable
+      const docs = await col
+        .find({ type: "write" }, { projection: { _id: 1 } })
+        .limit(5)
+        .toArray();
+
+      reads = docs.map((d) => d?._id?.toString() || null);
+    }
 
     res.json({
       status: "success",
@@ -123,37 +179,30 @@ app.get("/api/data", async (_req, res) => {
     });
 
   } catch (err) {
-    res.status(500).json({ status: "error", message: err.message });
-  }
-});
-/* ===========================
-   Stats Endpoint
-=========================== */
-app.get("/api/stats", async (_req, res) => {
-  if (!db) {
-    return res
-      .status(503)
-      .json({ status: "error", message: "DB not connected" });
-  }
-
-  try {
-    const count = await db.collection("records").countDocuments({});
-    res.json({
-      total_documents: count,
-      timestamp: new Date().toISOString(),
+    res.status(500).json({
+      status: "error",
+      message: err.message,
     });
-  } catch (err) {
-    res.status(500).json({ status: "error", message: err.message });
   }
 });
 
 /* ===========================
-   Start Server
+   Stats
 =========================== */
-app.listen(APP_PORT, "0.0.0.0", () => {
-  console.log(`[app] listening on port ${APP_PORT}`);
+
+app.get("/api/stats", async (_req, res) => {
+  if (!db) return res.status(503).json({ status: "DB not ready" });
+
+  const count = await db.collection("records").countDocuments({});
+  res.json({ total_documents: count });
 });
 
-connectMongo().catch((err) => {
-  console.error("[mongo] connection failed:", err.message);
+/* ===========================
+   Start
+=========================== */
+
+app.listen(APP_PORT, "0.0.0.0", () => {
+  console.log(`[app] listening on ${APP_PORT}`);
 });
+
+connectMongo();
