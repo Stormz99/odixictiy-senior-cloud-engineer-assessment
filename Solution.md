@@ -276,6 +276,8 @@ Create cluster:
 <img width="552" height="172" alt="image" src="https://github.com/user-attachments/assets/e7d1e2be-39eb-48b7-9e11-d12a65374007" />
 <img width="489" height="88" alt="image" src="https://github.com/user-attachments/assets/ee8d4723-3b0a-4425-8888-0ae73efbc62a" />
 <img width="498" height="115" alt="image" src="https://github.com/user-attachments/assets/b89aefa5-3966-4129-8a73-32130070b2ee" />
+<img width="503" height="47" alt="image" src="https://github.com/user-attachments/assets/464d6d9b-7478-4100-a515-415df518fb1f" />
+
 
 
 
