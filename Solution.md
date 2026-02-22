@@ -273,8 +273,10 @@ Create cluster:
 
 <img width="1154" height="805" alt="image" src="https://github.com/user-attachments/assets/d2487319-75c7-4584-b05b-631698b25fba" />
 <img width="1154" height="805" alt="image" src="https://github.com/user-attachments/assets/ce54cb3a-a1ff-467a-8d98-90761e8c2587" />
+<img width="769" height="203" alt="image" src="https://github.com/user-attachments/assets/bbfe3af4-2f9b-4643-a4d1-4057f20e96f2" />
 
 
+------------------------------------------------------------------------
 
 Run stress test:
     k6 run --vus 300 --duration 30s stress-test/stress-test.js
