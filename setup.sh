@@ -73,7 +73,8 @@ success "Manifests applied."
 
 # ── Wait for pods ─────────────────────────────────────────────────────────────
 info "Waiting for MongoDB to be ready (this may take ~60 s)..."
-kubectl rollout status deployment/mongo -n "${NAMESPACE}" --timeout=180s
+kubectl rollout status deployment/mongo -n "${NAMESPACE}" --timeout=300s
+kubectl rollout status deployment/worker -n "${NAMESPACE}" --timeout=120s
 
 info "Waiting for Node.js app to be ready..."
 kubectl rollout status deployment/app-nodejs -n "${NAMESPACE}" --timeout=120s
