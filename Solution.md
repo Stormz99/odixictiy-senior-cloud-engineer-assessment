@@ -285,8 +285,9 @@ Create cluster:
 ------------------------------------------------------------------------
 
 Run stress test:
-    k6 run --vus 300 --duration 30s stress-test/stress-test.js
-   
+    k6 run --vus 300 --duration 30s stress-test/stress-test.js   
+
+<img width="947" height="802" alt="image" src="https://github.com/user-attachments/assets/dd28eaa6-195a-46b2-969f-fd9693cf9185" />
 
 Monitor scaling:
 
