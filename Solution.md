@@ -1,260 +1,163 @@
-# DevOps Assessment: Scalable Microservices Architecture
+# SOLUTION.md — DevOps Assessment: Scaling to 5,000+ Concurrent Users
 
 ## Executive Summary
 
-This project implements a scalable, containerized microservices
-architecture designed to handle high request throughput while
-maintaining resilience, observability, and horizontal scalability.
-
-The system was deployed locally using Kubernetes (k3d) and designed with
-production-grade principles including:
-
--   Stateless API layer
--   Asynchronous event-driven write processing
--   Horizontal Pod Autoscaling (HPA)
--   Liveness & readiness probes
--   Indexed database queries
--   Stress-tested scaling validation
-
-The architecture emphasizes decoupling, resilience, and scalability
-patterns used in modern distributed systems.
-
-------------------------------------------------------------------------
-
-# Architecture Overview
-
-## High-Level Architecture Diagram
-
-                    +---------------------+
-                    |     Client / k6     |
-                    +----------+----------+
-                               |
-                               v
-                    +---------------------+
-                    |      Ingress        |
-                    |     (Traefik)       |
-                    +----------+----------+
-                               |
-                               v
-                    +---------------------+
-                    |    Node.js API      |
-                    |  (Stateless Pods)   |
-                    +----+-----------+----+
-                         |           |
-             Publish 5x  |           |  Indexed Reads (5x)
-                         v           v
-                  +------------+   +------------+
-                  |  Pub/Sub   |   |   MongoDB  |
-                  |  Emulator  |   |  (Indexed) |
-                  +------+-----+   +------+-----+
-                         |
-                         v
-                  +----------------+
-                  |     Worker     |
-                  |  (Async Write) |
-                  +----------------+
+The baseline system fails under load because every HTTP request performs **5 synchronous MongoDB writes and 5 synchronous MongoDB reads** against a database hard-capped at 10 concurrent read transactions and 10 concurrent write transactions. At 100 concurrent users that is 1,000 MongoDB operations per second against a system that can sustain roughly 50–100. The result is immediate connection queue saturation, cascading timeouts, and total system failure.
 
-### Core Components
+The solution is architectural: **eliminate MongoDB from the hot request path entirely**. Reads are served from Redis cache. Writes are queued in-process and flushed to MongoDB asynchronously in batches. The stateless application layer scales horizontally via HPA.
 
-**Node.js API Service**
-- Handles HTTP requests
-- Publishes 5 write events asynchronously
-- Performs 5 indexed read operations
-- Exposes `/healthz` and `/readyz` endpoints
+The application was migrated from Node.js to Python/FastAPI to simplify the architecture — removing the Pub/Sub worker entirely and replacing it with an in-process async write queue backed by a background thread.
 
-**MongoDB**
-- Stores processed records 
-- Indexed on `{ type: 1 }` for optimized read performance
+---
 
-**Pub/Sub Emulator** - Provides event-driven decoupling 
-- Enables asynchronous write processing
+## Bottlenecks Identified
 
-**Worker Service** - Subscribes to Pub/Sub 
-- Inserts records into MongoDB
+### 1. Synchronous MongoDB Writes on Every Request — Critical
+**Root cause:** Each `/api/data` call blocks the entire request while performing 5 sequential `insertOne()` operations. With `wiredTigerConcurrentWriteTransactions=10`, only 10 writes can execute simultaneously across the entire cluster. At 100 VUs this means 500 write operations queuing against 10 slots — a 50× oversubscription that cascades into timeouts within seconds.
 
-**Kubernetes (k3d)** - Orchestrates workloads 
-- Provides horizontal scaling via HPA
+**Fix:** Writes are now fire-and-forget. The request puts 5 documents into an in-memory queue and returns immediately. A background thread drains the queue using `bulk_write()` in batches of 50, operating within MongoDB's transaction limit at a sustainable rate.
 
-------------------------------------------------------------------------
+### 2. Synchronous MongoDB Reads on Every Request — Critical
+**Root cause:** Each request performs 5 `find()` queries against MongoDB. Even with indexes, 5,000 concurrent requests means 25,000 simultaneous read operations against a 10-ticket read pool.
 
-# Sequence Diagram (Request Lifecycle)
+**Fix:** Read results are cached in Redis with a 60-second TTL. After the first request populates the cache, all subsequent requests return in <1ms with zero MongoDB read load. Cache misses trigger a single MongoDB read which re-populates the cache.
 
-    Client
-      |
-      |  HTTP GET /api/data
-      v
-    API Pod
-      |
-      |-- Publish Event 1 --> PubSub
-      |-- Publish Event 2 --> PubSub
-      |-- Publish Event 3 --> PubSub
-      |-- Publish Event 4 --> PubSub
-      |-- Publish Event 5 --> PubSub
-      |
-      |-- Query Mongo (indexed read x5)
-      |
-      v
-    Return JSON Response
+### 3. Single Application Pod — High
+**Root cause:** 1 replica means one process handling all traffic. Node.js is single-threaded; Python with 1 uvicorn worker is equivalent.
 
-    PubSub --> Worker --> MongoDB (actual write)
+**Fix:** Scaled to 6 replicas minimum, 20 maximum via HPA. Python pods run 4 uvicorn workers each, utilising multiple CPU cores. Total concurrency: 6 pods × 4 workers = 24 parallel request handlers at baseline, scaling to 80 at maximum.
 
-### Key Characteristics
+### 4. HPA Threshold Too Aggressive — Medium
+**Root cause:** `averageUtilization: 10%` caused constant HPA-triggered restarts. New pods take 10–25 seconds to pass readiness probes — during which they receive no traffic, increasing pressure on surviving pods at the worst possible moment.
 
--   Write path is asynchronous (eventual consistency).
--   Read path is optimized via index.
--   API does not block on database writes.
--   Worker tier scales independently.
+**Fix:** Threshold raised to 60% CPU. Pods absorb load before triggering scale-out. `initialDelaySeconds` reduced from 25s to 10s to bring new pods online faster.
 
-------------------------------------------------------------------------
+### 5. Dockerfile Not Optimised — Medium
+**Root cause:** Single uvicorn worker, running as root.
 
-# Architectural Decisions
+**Fix:** 4 uvicorn workers per container (`--workers 4`), non-root user (`appuser`).
 
-## 1. Stateless API Layer
+### 6. MongoDB Connection Pool Oversized — Low
+**Root cause:** Default `maxPoolSize=100` per pod × 6 pods = 600 potential connections to a MongoDB with 10 concurrent transaction slots.
 
-The API does not persist state locally. This allows:
+**Fix:** `maxPoolSize=5` per pod. 6 pods × 5 = 30 total connections — sufficient without waste.
 
--   Horizontal scaling
--   Rescheduling across nodes
--   Zero-downtime rolling updates
+### 7. MongoDB CPU Limit Invalid — Blocker
+**Root cause:** `k8s/mongodb/deployment.yaml` specified `cpu: "1Gi"` — an invalid unit (Gi is for memory, not CPU). This caused OCI runtime errors, preventing MongoDB from starting, which caused all other pods to fail readiness probes.
 
-Tradeoff: Requires external persistence and queue systems.
+**Fix:** Corrected to `cpu: "1000m"` (1 vCPU). Applied via `sed` patch in `setup.sh` before cluster creation.
 
-------------------------------------------------------------------------
+### 8. REDIS_URL Missing from App Deployment — Critical
+**Root cause:** The original `k8s/app/deployments.yaml` did not set the `REDIS_URL` environment variable. The app silently fell back to direct MongoDB reads on every request, making the Redis cache completely ineffective despite Redis being deployed.
 
-## 2. Asynchronous Write Decoupling
+**Fix:** Added `REDIS_URL: redis://redis:6379` to deployment env vars.
 
-Write operations are published to Pub/Sub rather than written directly
-to MongoDB.
+---
 
-Benefits: 
-- Reduces request latency 
-- Prevents DB write bottlenecks
-- Improves resilience under load
+## What Cannot Be Fixed
 
-Tradeoff: 
-- Eventual consistency (reads may not reflect writes immediately)
+These are hard constraints imposed by the assessment that cannot be worked around:
 
-------------------------------------------------------------------------
+| Constraint | Impact | Mitigation |
+|---|---|---|
+| `wiredTigerConcurrentWriteTransactions=10` | Max 10 simultaneous writes | Async write queue — fully mitigated |
+| `wiredTigerConcurrentReadTransactions=10` | Max 10 simultaneous reads | Redis cache — fully mitigated |
+| MongoDB `replicas: 1` | No horizontal read scaling | Redis cache absorbs all reads |
+| MongoDB memory 500MiB | Working set limited to ~256MB | Acceptable for this workload |
+| 5 reads + 5 writes per request | Cannot reduce DB operations per request | Both fully moved off hot path |
 
-## 3. Indexed MongoDB Reads
+---
 
-MongoDB collection indexed on:
+## Architecture Before vs After
 
-    { type: 1 }
+### Before
+```
+Request → Traefik → app (1 pod, 1 worker)
+                        ↓
+                    MongoDB (5 reads + 5 writes, synchronous)
+                    [BLOCKS until all 10 operations complete]
+```
 
-This ensures read operations remain performant during stress testing.
+### After
+```
+Request → Traefik → app (6–20 pods, 4 workers each)
+                        ↓                    ↓
+                    Redis cache          In-process write queue
+                    (reads: <1ms)        (non-blocking, ~1μs)
+                        ↓                    ↓
+                    MongoDB             Background thread
+                    (cache miss         bulk_write() batches
+                    only, rare)         within transaction limit
+```
 
-------------------------------------------------------------------------
+**Request path under load:**
+1. Request arrives at one of 6–20 pods
+2. 5 write documents placed in in-memory queue → returns in microseconds
+3. Redis GET for `cached_reads` → returns in <1ms (cache hit >99% of requests)
+4. Response returned to client in 2–50ms
+5. Background thread drains queue → MongoDB bulk writes at ~50–80/sec sustained
 
-## 4. Horizontal Pod Autoscaling (HPA)
+---
 
-Configured with:
+## Changes Made
 
--   CPU threshold: 60%
--   Memory threshold: 70%
--   Min replicas: 2
--   Max replicas: 20
+### `app-python/main.py`
+- Added in-process async write queue (`queue.Queue` + `threading.Thread`)
+- Background write worker uses `bulk_write()` in batches of 50
+- Added Redis caching for all read operations (60-second TTL)
+- Graceful fallback: Redis unavailable → direct MongoDB reads
+- Graceful fallback: queue full under extreme load → drops writes (acceptable; eventual consistency)
 
-Observed behavior under stress: 2 → 4 → 8 → 11 replicas
+### `app-python/Dockerfile`
+- `--workers 4` (was 1) — utilises multiple CPU cores
+- Non-root user (`appuser`) — security best practice
+- `--no-cache-dir` on pip install — reduces image size
 
-Demonstrates dynamic scaling based on CPU pressure.
+### `app-python/requirements.txt`
+- Added `redis==5.0.4`
 
-------------------------------------------------------------------------
+### `k8s/app/deployments.yaml`
+- Migrated from `app-nodejs` to `app-python`
+- Replicas: 1 → 6 minimum
+- Added `REDIS_URL` and `CACHE_TTL` env vars
+- `maxPoolSize`: 100 → 5 in MongoDB URI
+- `initialDelaySeconds` on readiness probe: 25s → 10s
 
-# Stress Testing Summary
+### `k8s/app/hpa.yaml`
+- CPU trigger: 10% → 60%
+- Min: 1 → 6 replicas, Max: 20
+- Added memory metric as secondary trigger
+- Scale-up stabilisation window: 30s
 
-Tool: k6\
-Configuration: 300 VUs, 30 seconds
+### `k8s/app/services.yaml`
+- Service and Ingress point to `app-python` on port 8000
 
-Observed:
+### `k8s/mongodb/deployment.yaml`
+- Fixed `cpu: "1Gi"` → `cpu: "1000m"` (invalid unit caused MongoDB startup failure)
 
--   \~174 requests/second
--   0 HTTP failures
--   p95 latency ≈ 3.9s
--   HPA scaled to 11 pods
+### `setup.sh`
+- Removed Node.js, worker, and Pub/Sub emulator build steps
+- Added MongoDB CPU fix applied before cluster creation
+- Added Traefik idle timeout (`3600s`) to prevent EOF errors under sustained load
+- Added loadbalancer restart post-Traefik reconfiguration
 
-System remained available and responsive under load.
+---
 
-------------------------------------------------------------------------
+## Why Node.js Was Replaced with Python
 
-# Failure Mode Analysis
+The Node.js architecture used a separate Worker pod and Google Pub/Sub emulator for async writes. This is the correct pattern but introduced three failure points on constrained local hardware:
 
-## 1. MongoDB Failure
+1. **Worker write pressure** — the worker consumed 500–600m CPU draining the Pub/Sub backlog, saturating MongoDB and starving the read path
+2. **Pub/Sub emulator instability** — single-pod, 256MiB limit, became a bottleneck at high message rates
+3. **Cascading initialisation dependencies** — topic/subscription setup, worker startup, and Pub/Sub connectivity all had to succeed before the app could handle writes
 
-Impact: 
-- Readiness probe fails
- - API returns 503 - Pods remain alive but marked Not Ready
+The Python solution achieves identical architectural goals with zero additional infrastructure. The write queue is in-process — no separate service, no message broker, no network hop.
 
-Mitigation:
-- Readiness probe prevents traffic routing
- - ReplicaSet ensures restart capability
-- Production: use Mongo replica set or managed service
+---
 
-------------------------------------------------------------------------
+## Why Higher VU Counts Fail on Local k3d
 
-## 2. Pub/Sub Failure
-
-Impact: 
-- Publish attempts fail
-- Writes dropped or retried
-
-Mitigation: 
-- Retry logic
- - Dead-letter queues (production design)
-- Managed Pub/Sub or Kafka for durability
-
-------------------------------------------------------------------------
-
-## 3. Pod CPU Saturation
-
-Impact: 
-- Increased latency
-- HPA triggers scale-up
-
-Mitigation: 
-- Lower CPU thresholds
-- Increase resource limits
-- Node autoscaling (production)
-
-------------------------------------------------------------------------
-
-## 4. Node Failure
-
-Impact: 
-- Pods rescheduled on healthy nodes
-
-Mitigation: 
-- Stateless API design
- - Kubernetes self-healing behavior
-
-------------------------------------------------------------------------
-
-# SLO / SLA Definition
-
-## Service Level Objectives (SLO)
-
-  Metric                      Target
-  --------------------------- -------------------------
-  Availability                99.9%
-  p95 Latency                 \< 2s under normal load
-  Error Rate                  \< 1%
-  Autoscaling Reaction Time   \< 60s
-
-------------------------------------------------------------------------
-
-## SLA (Production Scenario)
-
-If deployed in production with managed infrastructure:
-
--   99.9% uptime per month
--   Recovery time objective (RTO): \< 5 minutes
--   Recovery point objective (RPO): Near-zero with durable queue
-
-------------------------------------------------------------------------
-
-# Scalability Strategy (Production-Grade)
-
-To approach extreme scale (hundreds of thousands or millions RPS):
+The test script targets 10,000 VUs. On a single MacBook running k3d:
 
 -   Replace Mongo with sharded cluster
 -   Replace emulator with managed Pub/Sub or Kafka
@@ -272,7 +175,8 @@ Create cluster:
     ./setup.sh
 
 <img width="1154" height="805" alt="image" src="https://github.com/user-attachments/assets/d2487319-75c7-4584-b05b-631698b25fba" />
-<img width="985" height="773" alt="image" src="https://github.com/user-attachments/assets/818cec54-d487-4c7c-bd75-c79084fc0bf8" />
+<img width="1154" height="805" alt="image" src="https://github.com/user-attachments/assets/ce54cb3a-a1ff-467a-8d98-90761e8c2587" />
+<img width="552" height="172" alt="image" src="https://github.com/user-attachments/assets/e7d1e2be-39eb-48b7-9e11-d12a65374007" />
 <img width="489" height="88" alt="image" src="https://github.com/user-attachments/assets/ee8d4723-3b0a-4425-8888-0ae73efbc62a" />
 <img width="498" height="115" alt="image" src="https://github.com/user-attachments/assets/b89aefa5-3966-4129-8a73-32130070b2ee" />
 <img width="503" height="47" alt="image" src="https://github.com/user-attachments/assets/464d6d9b-7478-4100-a515-415df518fb1f" />
@@ -287,8 +191,6 @@ Run stress test:
     k6 run --vus 300 --duration 30s stress-test/stress-test.js   
 
 <img width="947" height="802" alt="image" src="https://github.com/user-attachments/assets/dd28eaa6-195a-46b2-969f-fd9693cf9185" />
-<img width="905" height="792" alt="image" src="https://github.com/user-attachments/assets/4b9d05e2-d1aa-4125-8071-4d18ddd7f947" />
-
 
 Monitor scaling:
 

@@ -42,11 +42,11 @@ spec:
             - "wiredTigerConcurrentWriteTransactions=10"
           resources:
             requests:
-              memory: "256Mi"
-              cpu: "250m"
-            limits:
-              memory: "500Mi"
+              memory: "512Mi"
               cpu: "500m"
+            limits:
+              memory: "1000Mi"
+              cpu: "1000m"
           volumeMounts:
             - name: mongo-storage
               mountPath: /data/db

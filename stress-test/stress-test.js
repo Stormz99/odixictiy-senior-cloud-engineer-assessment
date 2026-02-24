@@ -124,7 +124,7 @@ export function teardown(data) {
   console.log('  Load test complete. Check thresholds above.');
   console.log('  Useful next steps:');
   console.log('    • kubectl top pods -n assessment');
-  console.log('    • kubectl logs -n assessment deploy/app-python');
+  console.log('    • kubectl logs -n assessment deploy/app-nodejs');
   console.log('    • kubectl logs -n assessment deploy/mongo');
   console.log('═══════════════════════════════════════════════════');
 }

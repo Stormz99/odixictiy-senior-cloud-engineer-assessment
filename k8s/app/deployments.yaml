@@ -1,56 +1,58 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: app-nodejs
+  name: app-python
   namespace: assessment
   labels:
-    app: app-nodejs
-    language: nodejs
+    app: app-python
+    language: python
     assessment: "true"
 spec:
   replicas: 6
   selector:
     matchLabels:
-      app: app-nodejs
+      app: app-python
   template:
     metadata:
       labels:
-        app: app-nodejs
-        language: nodejs
+        app: app-python
+        language: python
     spec:
       containers:
-        - name: app-nodejs
-          image: assessment/app-nodejs:latest
+        - name: app-python
+          image: assessment/app-python:latest
           imagePullPolicy: Never
           ports:
-            - containerPort: 3000
+            - containerPort: 8000
           env:
             - name: MONGO_URI
-              value: "mongodb://mongo:27017/assessmentdb"
+              value: "mongodb://mongo:27017/assessmentdb?maxPoolSize=5&minPoolSize=1&serverSelectionTimeoutMS=3000&connectTimeoutMS=3000&socketTimeoutMS=5000"
             - name: APP_PORT
-              value: "3000"
-            - name: PUBSUB_EMULATOR_HOST
-              value: "pubsub-emulator:8085"
+              value: "8000"
+            - name: REDIS_URL
+              value: "redis://redis:6379"
+            - name: CACHE_TTL
+              value: "60"
           resources:
             requests:
-              memory: "256Mi"
-              cpu: "500m"
+              memory: "128Mi"
+              cpu: "250m"
             limits:
               memory: "512Mi"
-              cpu: "2000m"
+              cpu: "1000m"
           readinessProbe:
             httpGet:
               path: /readyz
-              port: 3000
-            initialDelaySeconds: 25
-            periodSeconds: 10
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 6
           livenessProbe:
             httpGet:
               path: /healthz
-              port: 3000
-            initialDelaySeconds: 20
+              port: 8000
+            initialDelaySeconds: 15
             periodSeconds: 20
             timeoutSeconds: 3
             failureThreshold: 5

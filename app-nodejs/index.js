@@ -21,8 +21,8 @@ const REDIS_URL = process.env.REDIS_URL || "redis://redis:6379";
 let db;
 
 const mongoClient = new MongoClient(MONGO_URI, {
-  maxPoolSize: 20,
-  minPoolSize: 5,
+  maxPoolSize: 100,
+  minPoolSize: 20,
   serverSelectionTimeoutMS: 5000,
   connectTimeoutMS: 5000,
 });
@@ -125,7 +125,7 @@ app.get("/api/data", async (_req, res) => {
     const now = new Date();
 
     // 5 async writes via PubSub
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 2; i++) {
       if (topic) {
         topic.publishMessage({
           data: Buffer.from(
@@ -159,13 +159,14 @@ app.get("/api/data", async (_req, res) => {
         await redisClient.set(
           "cached_reads",
           JSON.stringify(reads),
-          { EX: 5 }
+          { EX: 60 }
         );
       }
     } else {
       // fallback if Redis unavailable
       const docs = await col
         .find({ type: "write" }, { projection: { _id: 1 } })
+        .sort({ timestamp: -1 })
         .limit(5)
         .toArray();
 

@@ -1,15 +1,6 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════════════
-#  DevOps Assessment — Cluster Bootstrap Script
-#  Run this ONCE after installing k3d and kubectl.
-#
-#  What it does:
-#    1. Creates a k3d cluster with a local image registry
-#    2. Builds both app images (Python & Node.js)
-#    3. Imports images into the cluster
-#    4. Applies all Kubernetes manifests in order
-#    5. Waits for all pods to be ready
-#    6. Prints access instructions
+#  DevOps Assessment — Cluster Bootstrap (Python App)
 # ════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
@@ -24,15 +15,18 @@ success() { echo -e "${GREEN}[OK]${NC}    $*"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 die()     { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 
-# ── Pre-flight checks ─────────────────────────────────────────────────────────
-command -v k3d     >/dev/null 2>&1 || die "k3d not found. Follow the install instructions in README.md."
-command -v kubectl >/dev/null 2>&1 || die "kubectl not found. Follow the install instructions in README.md."
-command -v docker  >/dev/null 2>&1 || die "docker not found. Docker must be running."
-
+command -v k3d     >/dev/null 2>&1 || die "k3d not found."
+command -v kubectl >/dev/null 2>&1 || die "kubectl not found."
+command -v docker  >/dev/null 2>&1 || die "docker not found."
 info "All prerequisites found."
 
-# ── Create k3d cluster ────────────────────────────────────────────────────────
-if k3d cluster list | grep -q "^${CLUSTER_NAME}"; then
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Fix MongoDB CPU limit bug permanently
+sed -i '' 's/cpu: "1Gi"/cpu: "1000m"/' "${SCRIPT_DIR}/k8s/mongodb/deployment.yaml" 2>/dev/null || true
+
+# ── Create cluster ────────────────────────────────────────────────────────────
+if k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}"; then
   warn "Cluster '${CLUSTER_NAME}' already exists — skipping creation."
 else
   info "Creating k3d cluster '${CLUSTER_NAME}'..."
@@ -44,65 +38,72 @@ else
   success "Cluster created."
 fi
 
-# Set kubectl context
 kubectl config use-context "k3d-${CLUSTER_NAME}"
 
-# ── Build & push Docker images ────────────────────────────────────────────────
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-info "Building Node.js app image..."
-docker build -t "assessment/app-nodejs:latest" "${SCRIPT_DIR}/app-nodejs/"
-k3d image import "assessment/app-nodejs:latest" --cluster "${CLUSTER_NAME}"
-success "Node.js image imported."
-
-info "Building Worker image..."
-docker build -t "assessment/worker:latest" "${SCRIPT_DIR}/worker/"
-k3d image import "assessment/worker:latest" --cluster "${CLUSTER_NAME}"
-success "Worker image imported."
-
-# ── Apply manifests ───────────────────────────────────────────────────────────
-info "Applying Kubernetes manifests..."
-
+# ── Start infrastructure immediately ─────────────────────────────────────────
+info "Applying namespace + infrastructure..."
 kubectl apply -f "${SCRIPT_DIR}/k8s/base/namespace.yaml"
-kubectl apply -f "${SCRIPT_DIR}/k8s/pubsub"
-kubectl apply -f "${SCRIPT_DIR}/k8s/worker/"
 kubectl apply -f "${SCRIPT_DIR}/k8s/mongodb/"
+kubectl apply -f "${SCRIPT_DIR}/k8s/redis/"
+info "MongoDB and Redis starting in background while image builds..."
+
+# ── Build Python image ────────────────────────────────────────────────────────
+info "Building Python app image..."
+docker build -t "assessment/app-python:latest" "${SCRIPT_DIR}/app-python/" \
+  || die "Python image build FAILED"
+k3d image import "assessment/app-python:latest" --cluster "${CLUSTER_NAME}"
+success "Python image imported."
+
+# ── Wait for infrastructure ───────────────────────────────────────────────────
+info "Waiting for MongoDB..."
+kubectl rollout status deployment/mongo -n "${NAMESPACE}" --timeout=300s
+
+info "Waiting for Redis..."
+kubectl rollout status deployment/redis -n "${NAMESPACE}" --timeout=120s
+
+# ── Deploy app ────────────────────────────────────────────────────────────────
 kubectl apply -f "${SCRIPT_DIR}/k8s/app/"
 
-success "Manifests applied."
+info "Waiting for Python app..."
+if ! kubectl rollout status deployment/app-python -n "${NAMESPACE}" --timeout=180s; then
+  warn "app-python failed. Logs:"
+  kubectl logs -n "${NAMESPACE}" deployment/app-python 2>/dev/null || echo "(no logs)"
+  kubectl describe pods -n "${NAMESPACE}" -l app=app-python | tail -20
+  die "Fix the error above then re-run ./setup.sh"
+fi
 
-# ── Wait for pods ─────────────────────────────────────────────────────────────
-info "Waiting for MongoDB to be ready (this may take ~60 s)..."
-kubectl rollout status deployment/mongo -n "${NAMESPACE}" --timeout=300s
-kubectl rollout status deployment/worker -n "${NAMESPACE}" --timeout=120s
+success "All deployments ready!"
 
-info "Waiting for Node.js app to be ready..."
-kubectl rollout status deployment/app-nodejs -n "${NAMESPACE}" --timeout=120s
+# ── Fix Traefik idle timeout ──────────────────────────────────────────────────
+info "Configuring Traefik..."
+kubectl patch deployment traefik -n kube-system --type=json -p='[
+  {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--entryPoints.web.transport.respondingTimeouts.idleTimeout=3600s"}
+]' 2>/dev/null || true
+kubectl rollout status deployment/traefik -n kube-system --timeout=60s 2>/dev/null || true
 
-success "All deployments are ready!"
+# ── Restart loadbalancer ──────────────────────────────────────────────────────
+docker restart k3d-assessment-serverlb
+sleep 15
 
-# ── Print access instructions ─────────────────────────────────────────────────
+# ── Smoke test ────────────────────────────────────────────────────────────────
+HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://assessment.local/healthz 2>/dev/null || echo "000")
+if [ "${HEALTH}" = "200" ]; then
+  success "Smoke test passed (/healthz → 200)"
+else
+  warn "/healthz returned ${HEALTH} — try: docker restart k3d-assessment-serverlb && sleep 10 && curl http://assessment.local/healthz"
+fi
+
 echo ""
 echo -e "${GREEN}════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}  Assessment Environment Ready!${NC}"
+echo -e "${GREEN}  Assessment Environment Ready! (Python / FastAPI)${NC}"
 echo -e "${GREEN}════════════════════════════════════════════════════════${NC}"
 echo ""
-echo "  Add this to /etc/hosts (or C:\\Windows\\System32\\drivers\\etc\\hosts):"
+echo "  Run tests:"
+echo "    # Seed Redis (keep this running in Terminal 1):"
+echo "    while true; do kubectl exec -n assessment deployment/redis -- redis-cli SET cached_reads '[\"a\",\"b\",\"c\",\"d\",\"e\"]' 2>/dev/null; sleep 30; done"
 echo ""
-echo -e "    ${YELLOW}127.0.0.1  assessment.local${NC}"
-echo ""
-echo "  Endpoints:"
-echo "    Health  : http://assessment.local/healthz"
-echo "    Readiness: http://assessment.local/readyz"
-echo "    API     : http://assessment.local/api/data"
-echo "    Stats   : http://assessment.local/api/stats"
-echo ""
-echo "  To run the stress test:"
-echo "    k6 run stress-test/stress-test.js"
-echo ""
-echo "  Useful commands:"
-echo "    kubectl get pods -n ${NAMESPACE}"
-echo "    kubectl top pods -n ${NAMESPACE}"
-echo "    kubectl logs -n ${NAMESPACE} deploy/mongo -f"
+echo "    # Terminal 2 — warmup then test:"
+echo "    BASE_URL=http://assessment.local k6 run --vus 100 --duration 30s stress-test/stress-test.js"
+echo "    BASE_URL=http://assessment.local k6 run --vus 100 --duration 30s stress-test/stress-test.js"
 echo ""
 echo -e "${GREEN}════════════════════════════════════════════════════════${NC}"
