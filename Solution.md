@@ -178,24 +178,9 @@ Create cluster:
 <img width="1154" height="805" alt="image" src="https://github.com/user-attachments/assets/ce54cb3a-a1ff-467a-8d98-90761e8c2587" />
 <img width="552" height="172" alt="image" src="https://github.com/user-attachments/assets/e7d1e2be-39eb-48b7-9e11-d12a65374007" />
 <img width="503" height="47" alt="image" src="https://github.com/user-attachments/assets/464d6d9b-7478-4100-a515-415df518fb1f" />
-<img width="1280" height="574" alt="image" src="https://github.com/user-attachments/assets/e3716ef1-9352-4578-a893-259b6626915a" />
-<img width="1894" height="1604" alt="image" src="https://github.com/user-attachments/assets/8bdd979d-a067-4cad-b405-4764af2fa425" />
-<img width="1894" height="1604" alt="image" src="https://github.com/user-attachments/assets/01864187-c2e7-4915-83a3-8240b1acfc07" />
-
-
-
-
-
 
 
 ------------------------------------------------------------------------
-
-Run stress test:
-    k6 run --vus 300 --duration 30s stress-test/stress-test.js   
-
-<img width="947" height="802" alt="image" src="https://github.com/user-attachments/assets/dd28eaa6-195a-46b2-969f-fd9693cf9185" />
-<img width="1894" height="1604" alt="image" src="https://github.com/user-attachments/assets/6ab28d0b-14e1-46c0-8150-9f6aae3d5d8f" />
-
 
 Monitor scaling:
 
