@@ -178,6 +178,8 @@ Create cluster:
 <img width="1154" height="805" alt="image" src="https://github.com/user-attachments/assets/ce54cb3a-a1ff-467a-8d98-90761e8c2587" />
 <img width="552" height="172" alt="image" src="https://github.com/user-attachments/assets/e7d1e2be-39eb-48b7-9e11-d12a65374007" />
 <img width="503" height="47" alt="image" src="https://github.com/user-attachments/assets/464d6d9b-7478-4100-a515-415df518fb1f" />
+<img width="1894" height="1604" alt="image" src="https://github.com/user-attachments/assets/238207b4-18ce-405f-86e7-c0a1b806e47d" />
+
 
 
 ------------------------------------------------------------------------
